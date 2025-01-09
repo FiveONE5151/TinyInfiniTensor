@@ -9,6 +9,8 @@ project(InfiniTensor C CXX)
 cmake_dependent_option(BUILD_TEST_CORE "Build tests for core components" ON BUILD_TEST OFF)
 
 set(DEFAULT_BUILD_TYPE "RelWithDebInfo")
+# compile_commands
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Build Type
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     message("Configuring for Debug build.")
