@@ -1,4 +1,5 @@
 #include "operators/unary.h"
+#include <iostream>
 
 namespace infini
 {
@@ -39,7 +40,13 @@ namespace infini
         // TODO：返回经过 clip 操作后的 shape
         // REF: https://onnx.ai/onnx/operators/onnx__Clip.html#clip-13
         // =================================== 作业 ===================================
-        return std::nullopt;
+
+        // clip操作不改变输入张量的形状
+        vector<Shape> output_dims;
+        for (auto& input : inputs) {
+            output_dims.push_back(input->getDims());
+        }
+        return output_dims;
     }
 
     std::string ClipObj::toString() const
@@ -66,7 +73,13 @@ namespace infini
         // REF_FILE: src/core/operator.cc
         // REF: https://onnx.ai/onnx/operators/onnx__Cast.html#cast-21
         // =================================== 作业 ===================================
-        return {};
+
+        // 直接调用getOutputDataType即可
+        vector<DataType> result = {};
+        for (auto& input : inputs) {
+            result.push_back(getOutputDataType());
+        }
+        return result;
     }
 
     optional<vector<Shape>> CastObj::inferShape(const TensorVec &inputs)
@@ -75,7 +88,12 @@ namespace infini
         // TODO：返回经过 cast 操作后的 shape
         // REF: https://onnx.ai/onnx/operators/onnx__Cast.html#cast-21
         // =================================== 作业 ===================================
-        return std::nullopt;
+        // 不改变输入张量shape
+        vector<Shape> output_dims;
+        for (auto& input : inputs) {
+            output_dims.push_back(input->getDims());
+        }
+        return output_dims;
     }
 
     std::string CastObj::toString() const
