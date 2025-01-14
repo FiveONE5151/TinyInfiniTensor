@@ -4,6 +4,7 @@
 #include "operators/transpose.h"
 
 #include "test.h"
+#include <iostream>
 
 namespace infini {
 
@@ -12,7 +13,13 @@ TEST(Transpose, ShapeInference) {
     {
         Graph g = make_ref<GraphObj>(runtime);
         Tensor i = g->addTensor({1, 2, 3, 4}, DataType::Float32);
+        std::cout<<"Testing Transpose with permute {1.2.3.4}\n";
         auto op = g->addOp<TransposeObj>(i, nullptr, Shape{0, 1, 2, 3});
+        std::cout<<"Transpose object: "<<op->toString();
+        std::cout << "Expected shape: {1, 2, 3, 4}, Actual shape: ";
+        for (auto dim : op->getOutput()->getDims()) {
+            std::cout << dim << " ";
+        }
         EXPECT_EQ(op->getOutput()->getDims(), (Shape{1, 2, 3, 4}));
     }
     {
