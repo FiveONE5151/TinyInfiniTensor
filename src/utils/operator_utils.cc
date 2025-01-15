@@ -1,4 +1,5 @@
 #include "utils/operator_utils.h"
+#include "core/common.h"
 #include "core/runtime.h"
 #include <algorithm>
 #include <cstddef>
@@ -13,47 +14,38 @@ Shape infer_broadcast(const Shape& A, const Shape& B)
     // TODO：对 A 和 B 进行双向广播，返回广播后的形状。
     // REF: https://github.com/onnx/onnx/blob/main/docs/Broadcasting.md
     // =================================== 作业 ===================================
-    Shape result = {};
-    // 1. shape完全相同，直接返回
-    if (A == B) {
-        return A;
-    } else if (A != B && A.size() == B.size()) { // 2. 形状不同但是维度相同，按位取更大的
-        for (int i = 0; i < static_cast<int>(A.size()); ++i) {
-            if (A[i] < B[i]) {
-                result.push_back(B[i]);
-            } else {
-                result.push_back(A[i]);
-            }
+    if (A.empty() && B.empty()) {
+        return {};
+    }
+    auto A_ = A;
+    auto B_ = B;
+    int rankA = A.size();
+    int rankB = B.size();
+
+    // 取更大的维度作为结果维度
+    int rank = std::max(rankA, rankB);
+
+    //如果是A更小，那么在A前面补全1
+    if (rankA < rank) {
+        int offset = rank - rankA;
+        for (int i = 0; i < offset; ++i) {
+            A_.insert(A_.begin(), 1);
         }
-    } else { //3. 维度不相同
-        int pad = A.size() - B.size();
-        // A的维度更小，那么在A的shape前填充1，再按位取大的
-        if (pad < 0) {
-            for (int i = 0; i < -pad; ++i) {
-                result.push_back(B[i]);
-            }
-            for (int i = -pad, j = 0; i < static_cast<int>(B.size()); ++i, ++j) {
-                if (A[j] < B[i]) {
-                    result.push_back(B[i]);
-                } else {
-                    result.push_back(A[j]);
-                }
-            }
-        } else { // B的维度更小，同理
-            for (int i = 0; i < pad; ++i) {
-                result.push_back(A[i]);
-            }
-            for (int i = pad, j = 0; i < static_cast<int>(A.size()); ++i, ++j) {
-                if (A[i] < B[j]) {
-                    result.push_back(B[j]);
-                } else {
-                    result.push_back(A[i]);
-                }
-            }
+    }
+    //同理，B更小
+    if (rankB < rank) {
+        int offset = rank - rankB;
+        for (int i = 0; i < offset; ++i) {
+            B_.insert(B_.begin(), 1);
         }
     }
 
-    return result;
+    Shape ret;
+    for (int i = 0; i < rank; ++i) {
+        IT_ASSERT(A_[i] == B_[i] || A_[i] == 1 || B_[i] == 1);
+        ret.push_back(std::max(A_[i], B_[i]));
+    }
+    return ret;
 }
 
 int get_real_axis(const int& axis, const int& rank)
