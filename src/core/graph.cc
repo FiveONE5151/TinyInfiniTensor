@@ -1,6 +1,13 @@
 #include "core/graph.h"
+#include "core/common.h"
+#include "core/op_type.h"
+#include "core/runtime.h"
+#include "operators/transpose.h"
 #include <algorithm>
+#include <iostream>
+#include <memory>
 #include <numeric>
+#include <ostream>
 #include <queue>
 
 namespace infini
@@ -38,14 +45,20 @@ namespace infini
 
     string GraphObj::toString() const
     {
+        //std::cout<<"Enter Graph.toString()"<<std::endl;
         std::ostringstream oss;
         oss << "Graph Tensors:\n";
-        for (const auto &tensor : tensors)
+        
+        for (const auto &tensor : tensors){
             oss << tensor << "\n";
+        }
+        
+       // std::cout<<"Graph Tensors written"<<std::endl;
 
         oss << "Graph operators:\n";
         for (const auto &op : ops)
         {
+          //  std::cout<<"Writing operator: "<<op->toString()<<std::endl;
             vector<UidBaseType> preds, succs;
             for (auto &o : op->getPredecessors())
                 preds.emplace_back(o->getGuid());
@@ -56,6 +69,8 @@ namespace infini
             oss << ", succ " << vecToString(succs);
             oss << ", " << op << "\n";
         }
+
+        //std::cout<<"Graph Operators written"<<std::endl;
         return oss.str();
     }
 
@@ -65,8 +80,8 @@ namespace infini
         {
             return true;
         }
-        std::vector<Operator> sorted;
-        std::unordered_set<OperatorObj *> flags;
+        std::vector<Operator> sorted; // 排序后的operator
+        std::unordered_set<OperatorObj *> flags; // 记录已经被排序的operator
         sorted.reserve(ops.size());
         flags.reserve(ops.size());
         while (sorted.size() < ops.size())
@@ -75,6 +90,9 @@ namespace infini
             auto modified = false;
             for (auto const &op : ops)
             {
+                // if初始化语句(cpp17), 获取当前operator的所有输入tensor
+                // 条件1: 当前operator没有被处理过
+                // 条件2: 输入tensor的来源operator为空或者已经被排序处理(即入度为0)
                 if (auto const &inputs = op->getInputs();
                     flags.find(op.get()) == flags.end() &&
                     std::all_of(inputs.begin(), inputs.end(),
@@ -89,12 +107,12 @@ namespace infini
                     flags.insert(op.get());
                 }
             }
-            if (!modified)
+            if (!modified) // 没有入度为0的节点, 说明图有环
             {
                 return false;
             }
         }
-        this->ops = std::move(sorted);
+        this->ops = std::move(sorted); //修改成员变量为排序后的operators
         return this->sorted = true;
     }
 
@@ -106,6 +124,112 @@ namespace infini
         // 1. 去除冗余的算子（例如，两个相邻的算子都是 transpose 算子，且做的是相反的操作，可以将其全部删除）
         // 2. 合并算子（例如，矩阵乘算子中含有属性transA、transB，如果其输入存在transpose，且对最后两个维度做交换，就可以将transpose融入到矩阵乘算子的属性中去）
         // =================================== 作业 ===================================
+
+        // 1. 去除冗余的算子（例如，两个相邻的算子都是 transpose 算子，且做的是相反的操作，可以将其全部删除）
+        // 遍历所有算子, 观察它的前几个和后几个相邻算子是否都是transpose
+        std::unordered_set<Operator> flags; // 记录已经被删除的operator
+        for (auto const& op : ops) {
+            std::cout << "Current op: " << op->toString() << std::endl;
+            // 优化连续的transpose
+            if (flags.find(op) == flags.end() and op->getOpType() == OpType::Transpose) {
+                auto transposeOp = std::dynamic_pointer_cast<TransposeObj>(op);
+                auto predecessors = transposeOp->getPredecessors();
+
+                if (predecessors.empty()) {
+                    std::cout << "TransposeObj's predecessor is empty" << std::endl;
+                    continue;
+                }
+
+                // TRANSPOSE只能有1个输入
+                std::cout << "Predecessors size: " << predecessors.size() << std::endl;
+                IT_ASSERT(predecessors.size() == 1);
+
+                std::cout << "Predecessor's optype: " << predecessors[0]->getOpType().toString() << std::endl;
+                std::cout << "OpType==Transpose? " << (predecessors[0]->getOpType() == OpType::Transpose) << std::endl;
+
+                if (predecessors[0]->getOpType() != OpType::Transpose) {
+                    std::cout << "TransposeObj's predecessor is not TransposeObj" << std::endl;
+                    continue;
+                }
+
+                std::cout << "successive transpose optimization begin" << std::endl;
+
+                auto pre_op = std::dynamic_pointer_cast<TransposeObj>(predecessors[0]);
+                if (!pre_op) {
+                    std::cerr << "Cast Operator to Transpose failed" << std::endl;
+                    continue;
+                }
+                auto perm = transposeOp->getPermute();
+                std::cout << "Current op perm: " << vecToString(perm) << std::endl;
+                auto pre_perm = pre_op->getPermute();
+                std::cout << "pre op perm: " << vecToString(pre_perm) << std::endl;
+
+                // 判断是否是相反的操作
+                // 即perm是否相等
+                if (perm == pre_perm) {
+                    std::cout << "***** perm==pre_perm, remove the operators" << std::endl;
+
+                    // this->removeOperator(pre_op);
+                    // this->removeOperator(op);
+                    // 不能直接在循环内部remove, 因为循环的iterator下一个会迭代到被删除的operator, 应该先记录, 循环结束后再remove
+                    flags.insert(pre_op);
+                    flags.insert(op);
+                    std::cout << "operators removed" << std::endl;
+                }
+            } 
+            // TODO(yiwu0531): 
+            // 2. 合并算子（例如，矩阵乘算子中含有属性transA、transB，如果其输入存在transpose，且对最后两个维度做交换，就可以将transpose融入到矩阵乘算子的属性中去）
+        }
+
+        // 删除operator和其他所有相关信息
+        std::cout<<"Deleting operators..."<<std::endl;
+        for (auto& deleted : flags) {
+            std::cout<<"deleting operator: "<<deleted->getGuid()<<std::endl;
+            auto input = deleted->getInputs()[0];
+            auto output = deleted->getOutputs()[0];
+
+            // !! 从tensor出发, 来操作节点之间的连接 !!
+            // 先把input tensor的target(即deleted op本身)删除
+            input->removeTarget(deleted);
+            bool has_successor = deleted->getSuccessors().size();
+
+            // 如果deleted有后续节点
+            // 那么把后续节点的input tensor替换
+            // 并把input的target设置成后续节点
+            // 再把当前节点从后续节点的predecessor删除
+            if (has_successor) {
+                for (auto& next_op : deleted->getSuccessors()) {
+                    next_op->replaceInput(output, input);
+                    input->addTarget(next_op);
+                    next_op->removePredecessors(deleted);
+                }
+            }
+
+            // 删除output tensor
+            removeTensor(output);
+
+            // 如果deleted有前面节点
+            // 那么要先把当前节点从前面节点的successor删除
+            // 再根据是否有后续节点, 判断是否要把后续节点加入到前面节点的successor中
+            if (deleted->getPredecessors().size()) {
+                for (auto& prev_op : deleted->getPredecessors()) {
+                    prev_op->removeSuccessors(deleted);
+                    if (has_successor) {
+                        for (auto& next_op : deleted->getSuccessors()) {
+                            prev_op->addSuccessors(next_op);
+                        }
+                    }
+                }
+            }
+
+            // 从graph中删除节点
+            removeOperator(deleted);
+            std::cout<<"graph after deleting operator "<< deleted->getGuid()<<":\n";
+            std::cout<<toString()<<std::endl;
+        }
+
+        std::cout<< "Graph after transpose optimization: \n";
+        std::cout<<this->toString()<<std::endl;
     }
 
     Tensor GraphObj::getTensor(int fuid) const
