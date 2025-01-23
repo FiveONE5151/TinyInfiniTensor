@@ -2,8 +2,10 @@
 #include "core/common.h"
 #include "core/op_type.h"
 #include "core/runtime.h"
+#include "operators/matmul.h"
 #include "operators/transpose.h"
 #include <algorithm>
+#include <cstddef>
 #include <iostream>
 #include <memory>
 #include <numeric>
@@ -129,62 +131,75 @@ namespace infini
         // 遍历所有算子, 观察它的前几个和后几个相邻算子是否都是transpose
         std::unordered_set<Operator> flags; // 记录已经被删除的operator
         for (auto const& op : ops) {
-            std::cout << "Current op: " << op->toString() << std::endl;
-            // 优化连续的transpose
+            // 优化ranspose
             if (flags.find(op) == flags.end() and op->getOpType() == OpType::Transpose) {
                 auto transposeOp = std::dynamic_pointer_cast<TransposeObj>(op);
                 auto predecessors = transposeOp->getPredecessors();
+                auto successors = transposeOp->getSuccessors();
 
-                if (predecessors.empty()) {
-                    std::cout << "TransposeObj's predecessor is empty" << std::endl;
-                    continue;
+                // 优化连续相反的transpose
+                if (!predecessors.empty() && predecessors[0]->getOpType() == OpType::Transpose) {
+
+                    // TRANSPOSE只能有1个输入
+                    IT_ASSERT(predecessors.size() == 1);
+
+                    auto pre_op = std::dynamic_pointer_cast<TransposeObj>(predecessors[0]);
+                    if (!pre_op) {
+                        continue;
+                    }
+                    auto perm = transposeOp->getPermute();
+                    auto pre_perm = pre_op->getPermute();
+
+                    // 判断是否是相反的操作
+                    // 即perm是否相等
+                    if (perm == pre_perm) {
+                        // this->removeOperator(pre_op);
+                        // this->removeOperator(op);
+                        // 不能直接在循环内部remove, 因为循环的iterator下一个会迭代到被删除的operator, 应该先记录, 循环结束后再remove
+                        flags.insert(pre_op);
+                        flags.insert(op);
+                    }
                 }
+                // 2. 合并算子（例如，矩阵乘算子中含有属性transA、transB，如果其输入存在transpose，且对最后两个维度做交换，就可以将transpose融入到矩阵乘算子的属性中去）
+                else if (!successors.empty()&&successors[0]->getOpType()==OpType::MatMul) {
+                    auto matmulOp = std::dynamic_pointer_cast<MatmulObj>(successors[0]);
+                    auto perm = transposeOp->getPermute();
 
-                // TRANSPOSE只能有1个输入
-                std::cout << "Predecessors size: " << predecessors.size() << std::endl;
-                IT_ASSERT(predecessors.size() == 1);
+                    int m = perm.size()-2;
+                    int n = perm.size()-1;
+                    bool legalTrans = false;
 
-                std::cout << "Predecessor's optype: " << predecessors[0]->getOpType().toString() << std::endl;
-                std::cout << "OpType==Transpose? " << (predecessors[0]->getOpType() == OpType::Transpose) << std::endl;
+                    for (int i = 0; i < (int)perm.size(); ++i) {
+                        if (i < (int)perm.size() - 2) {
+                            if (perm[i] != i)
+                                break;
+                        } else {
+                            if (perm[i] == n && perm[i + 1] == m) {
+                                legalTrans = true;
+                                break;
+                            } else
+                                break;
+                        }
+                    }
 
-                if (predecessors[0]->getOpType() != OpType::Transpose) {
-                    std::cout << "TransposeObj's predecessor is not TransposeObj" << std::endl;
-                    continue;
-                }
+                    if (!legalTrans) {
+                        continue;
+                    }
 
-                std::cout << "successive transpose optimization begin" << std::endl;
-
-                auto pre_op = std::dynamic_pointer_cast<TransposeObj>(predecessors[0]);
-                if (!pre_op) {
-                    std::cerr << "Cast Operator to Transpose failed" << std::endl;
-                    continue;
-                }
-                auto perm = transposeOp->getPermute();
-                std::cout << "Current op perm: " << vecToString(perm) << std::endl;
-                auto pre_perm = pre_op->getPermute();
-                std::cout << "pre op perm: " << vecToString(pre_perm) << std::endl;
-
-                // 判断是否是相反的操作
-                // 即perm是否相等
-                if (perm == pre_perm) {
-                    std::cout << "***** perm==pre_perm, remove the operators" << std::endl;
-
-                    // this->removeOperator(pre_op);
-                    // this->removeOperator(op);
-                    // 不能直接在循环内部remove, 因为循环的iterator下一个会迭代到被删除的operator, 应该先记录, 循环结束后再remove
-                    flags.insert(pre_op);
-                    flags.insert(op);
-                    std::cout << "operators removed" << std::endl;
+                    if (transposeOp->getOutputs()[0] == matmulOp->getInputs()[0]) {
+                        matmulOp->setTransA(!matmulOp->getTransA());
+                        flags.insert(transposeOp);
+                    } else if (transposeOp->getOutputs()[0] == matmulOp->getInputs()[1]) {
+                        matmulOp->setTransB(!matmulOp->getTransB());
+                        flags.insert(transposeOp);
+                    }
                 }
             } 
-            // TODO(yiwu0531): 
-            // 2. 合并算子（例如，矩阵乘算子中含有属性transA、transB，如果其输入存在transpose，且对最后两个维度做交换，就可以将transpose融入到矩阵乘算子的属性中去）
+            
         }
 
         // 删除operator和其他所有相关信息
-        std::cout<<"Deleting operators..."<<std::endl;
         for (auto& deleted : flags) {
-            std::cout<<"deleting operator: "<<deleted->getGuid()<<std::endl;
             auto input = deleted->getInputs()[0];
             auto output = deleted->getOutputs()[0];
 
@@ -224,12 +239,7 @@ namespace infini
 
             // 从graph中删除节点
             removeOperator(deleted);
-            std::cout<<"graph after deleting operator "<< deleted->getGuid()<<":\n";
-            std::cout<<toString()<<std::endl;
         }
-
-        std::cout<< "Graph after transpose optimization: \n";
-        std::cout<<this->toString()<<std::endl;
     }
 
     Tensor GraphObj::getTensor(int fuid) const
