@@ -1,4 +1,5 @@
 #pragma once
+#include "core/common.h"
 #include "core/runtime.h"
 #include "core/tensor.h"
 #ifdef BUILD_TEST
@@ -9,9 +10,8 @@
 #include <unordered_set>
 
 namespace infini {
-  class Allocator
-  {
-  private:
+class Allocator {
+private:
     Runtime runtime;
 
     size_t used;
@@ -21,14 +21,16 @@ namespace infini {
     size_t alignment;
 
     // pointer to the memory actually allocated
-    void *ptr;
+    void* ptr;
 
     // =================================== 作业 ===================================
     // TODO：可能需要设计一个数据结构来存储free block，以便于管理和合并
     // HINT: 可以使用一个 map 来存储 free block，key 为 block 的起始/结尾地址，value 为 block 的大小
     // =================================== 作业 ===================================
+    map<size_t, size_t> freeBlocks;
 
-  public:
+
+public:
     Allocator(Runtime runtime);
 
     virtual ~Allocator();
@@ -47,13 +49,13 @@ namespace infini {
 
     // function: perform actual memory allocation
     // return: pointer to the head address of the allocated memory
-    void *getPtr();
+    void* getPtr();
 
     void info();
 
-  private:
+private:
     // function: memory alignment, rouned up
     // return: size of the aligned memory block
     size_t getAlignedSize(size_t size);
-  };
+};
 }

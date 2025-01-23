@@ -1,11 +1,13 @@
 #include "core/graph.h"
 #include "core/common.h"
 #include "core/op_type.h"
+#include "core/ref.h"
 #include "core/runtime.h"
 #include "operators/matmul.h"
 #include "operators/transpose.h"
 #include <algorithm>
 #include <cstddef>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <numeric>
@@ -286,6 +288,20 @@ namespace infini
         // TODO：利用 allocator 给计算图分配内存
         // HINT: 获取分配好的内存指针后，可以调用 tensor 的 setDataBlob 函数给 tensor 绑定内存
         // =================================== 作业 ===================================
+        
+        vector<size_t> offsets;
+        
+        for (auto& tensor : tensors) {
+            auto size = tensor->getBytes();
+            auto offset = allocator.alloc(size);
+            offsets.push_back(offset);
+        }
+
+        for (size_t i = 0; i < tensors.size(); i++) {
+            auto ptr = static_cast<char*>(allocator.getPtr()) + offsets[i];
+            auto blob = make_ref<BlobObj>(this->runtime, ptr);
+            this->tensors[i]->setDataBlob(blob);
+        }
 
         allocator.info();
     }
