@@ -53,9 +53,7 @@ TEST(Concat, NativeCpuSWallocator)
     auto op2 = g->addOpWithOutputs<TransposeObj>(t1, t2, Shape { 0, 1, 3, 2 });
     auto op3 = g->addOpWithOutputs<TransposeObj>(i2, t3, Shape { 0, 2, 3, 1 });
     auto op4 = g->addOpWithOutputs<ConcatObj>(TensorVec { t2, t3 }, t4, 3);
-    std::cout << "Graph: \n"
-              << g->toString() << std::endl;
-
+    
     g->dataMalloc();
     std::cout << "Graph: \n"
               << g->toString() << std::endl;

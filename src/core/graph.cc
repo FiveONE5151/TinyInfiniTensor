@@ -287,6 +287,7 @@ void GraphObj::dataMalloc()
         } else { // graph input or output, allocate memory and cannot be reused
             auto size = tensor->getBytes();
             offsets[fuid] = allocator.alloc(size);
+            std::cout << "Allocating for input/output tensor " << fuid << std::endl;
         }
     }
     unordered_map<int, uint64_t> act_ref_count = ref_count;
@@ -303,8 +304,14 @@ void GraphObj::dataMalloc()
         for (auto const& output : outputs) {
             auto fuid = output->getFuid();
             auto size = output->getBytes();
+
+            // 如果是图的输出tensor，则不需要分配
+            if (act_ref_count.find(fuid) == act_ref_count.end())
+                continue;
+
             // sorted_tensors.push_back(fuid);
             // used += size;
+            std::cout << "Allocating for tensor " << fuid << std::endl;
             auto offset = allocator.alloc(size);
             offsets[fuid] = offset;
         }
@@ -316,6 +323,7 @@ void GraphObj::dataMalloc()
 
             // no longer be used, recycle the memory
             if (act_ref_count[fuid] == 0) {
+                std::cout << "releasing tensor " << fuid << std::endl;
                 act_ref_count.erase(fuid);
                 allocator.free(offsets[fuid], size);
             }
