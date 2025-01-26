@@ -272,72 +272,51 @@ void GraphObj::dataMalloc()
     // HINT: 获取分配好的内存指针后，可以调用 tensor 的 setDataBlob 函数给 tensor 绑定内存
     // =================================== 作业 ===================================
     unordered_map<int, uint64_t> ref_count, offsets;
-
+    auto graph_inputs = getInputs();
+    auto graph_outputs = getOutputs();
+    // 输入和输出tensor的空间不能被用于回收reused，所以先分配输入输出的tensor
     //获取每个tensor的引用计数，用于判断tensor在后续是否还会被使用到
     for (auto const& tensor : tensors) {
         auto fuid = tensor->getFuid();
-        for (auto const& op : ops) {
-            if (std::find(op->getInputs().begin(), op->getInputs().end(), tensor) != op->getInputs().end()) {
-                ref_count[fuid]++;
-            }
-            if (std::find(op->getOutputs().begin(), op->getOutputs().end(), tensor) != op->getOutputs().end()) {
-                ref_count[fuid]++;
-            }
+        auto input_it = std::find(graph_inputs.begin(), graph_inputs.end(), tensor);
+        auto output_it = std::find(graph_outputs.begin(), graph_outputs.end(), tensor);
+
+        if (input_it == graph_inputs.end() and output_it == graph_outputs.end()) {
+            // 直接使用缓存的数据，不用再遍历所有op，线性复杂度
+            ref_count[fuid] = tensor->getTargets().size();
+        } else { // graph input or output, allocate memory and cannot be reused
+            auto size = tensor->getBytes();
+            offsets[fuid] = allocator.alloc(size);
         }
     }
     unordered_map<int, uint64_t> act_ref_count = ref_count;
-    vector<int> sorted_tensors; // 按照分配的顺序排序的tensor id
-    // size_t peak = 0;
-    // size_t used = 0;
+    std::cout << "Initial ref count:\n";
+    for (auto const& item : act_ref_count) {
+        std::cout << "tensor " << item.first << ": " << item.second << std::endl;
+    }
+
+    // 由于输入tensor已经被全部分配，所以首先分配op的output tensor，即计算图的中间tensor
+    // 再看op的input需不需要重用
     for (auto const& op : ops) {
         auto const& inputs = op->getInputs();
         auto const& outputs = op->getOutputs();
-        for (auto const& input : inputs) {
-            auto fuid = input->getFuid();
-            auto size = input->getBytes();
-            // 如果tensor的引用次数不等于最开始的引用次数，就说明已经被分配空间
-            if (act_ref_count[fuid] != ref_count[fuid]) {
-                continue;
-            }
+        for (auto const& output : outputs) {
+            auto fuid = output->getFuid();
+            auto size = output->getBytes();
             // sorted_tensors.push_back(fuid);
             // used += size;
             auto offset = allocator.alloc(size);
             offsets[fuid] = offset;
-            act_ref_count[fuid]--; // 被使用次数-1
         }
 
-        for (auto const& output : outputs) {
-            auto fuid = output->getFuid();
-            auto size = output->getBytes();
-            // 如果tensor的引用次数不等于最开始的引用次数，就说明已经被分配空间
-            if (act_ref_count[fuid] != ref_count[fuid]) {
-                continue;
-            }
-            // sorted_tensors.push_back(fuid);
-            // used += size;
-            auto offset = allocator.alloc(size);
-            offsets[fuid] = offset;
-            act_ref_count[fuid]--;
-        }
-
-        // 判断该算子所消耗的tensor空间是否是整个计算图中最大的
-        // peak = used > peak ? used : peak;
-
-        // 释放后续不会被用到的tensor内存
         for (auto const& input : inputs) {
             auto fuid = input->getFuid();
             auto size = input->getBytes();
+            act_ref_count[fuid] -= 1;
 
-            if (ref_count[fuid] == 0) {
-                allocator.free(offsets[fuid], size);
-            }
-        }
-
-        for (auto const& output : outputs) {
-            auto fuid = output->getFuid();
-            auto size = output->getBytes();
-
-            if (ref_count[fuid] == 0) {
+            // no longer be used, recycle the memory
+            if (act_ref_count[fuid] == 0) {
+                act_ref_count.erase(fuid);
                 allocator.free(offsets[fuid], size);
             }
         }

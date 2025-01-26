@@ -21,14 +21,14 @@ TEST(Concat, NativeCpu)
     auto t1 = g->addTensor({ 2, 2, 3, 1 }, DataType::Float32);
     auto t2 = g->addTensor({ 2, 2, 1, 1 }, DataType::Float32);
     auto t3 = g->addTensor({ 2, 2, 2, 1 }, DataType::Float32);
-    auto op = g->addOp<ConcatObj>(TensorVec { std::move(t1), std::move(t2), std::move(t3) }, nullptr, 2);
+    auto op = g->addOp<ConcatObj>(TensorVec { t1, t2, t3 }, nullptr, 2);
     std::cout << "t1==nullptr?" << (t1 == nullptr) << std::endl;
     g->dataMalloc();
     std::cout << "space allocated" << std::endl;
 
-    g->getInputs()[0]->setData(IncrementalGenerator());
-    g->getInputs()[1]->setData(OneGenerator());
-    g->getInputs()[2]->setData(OneGenerator());
+    t1->setData(IncrementalGenerator());
+    t2->setData(OneGenerator());
+    t3->setData(OneGenerator());
     std::cout << "Data set" << std::endl;
     runtime->run(g);
     EXPECT_TRUE(op->getOutput()->equalData(
@@ -62,9 +62,7 @@ TEST(Concat, NativeCpuSWallocator)
 
     i1->setData(IncrementalGenerator());
     i2->setData(IncrementalGenerator());
-    t1->setData(IncrementalGenerator());
-    t2->setData(IncrementalGenerator());
-    t3->setData(IncrementalGenerator());
+
     runtime->run(g);
 
     std::cout << "output:\n "
